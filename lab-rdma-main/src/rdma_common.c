@@ -140,15 +140,13 @@ int process_work_completion_events (struct ibv_comp_channel *comp_channel,
 	void *context = NULL;
 	int ret = -1, i, total_wc = 0;
        /* We wait for the notification on the CQ channel */
-	   // TODO
-	ret = NULL;
+	ret = ibv_get_cq_event(comp_channel, &cq_ptr, &context);
        if (ret) {
 	       rdma_error("Failed to get next CQ event due to %d \n", -errno);
 	       return -errno;
        }
        /* Request for more notifications. */
-	   // TODO
-       ret = NULL;
+       ret = ibv_req_notify_cq(cq_ptr, 0);
        if (ret){
 	       rdma_error("Failed to request further notifications %d \n", -errno);
 	       return -errno;
@@ -160,8 +158,7 @@ int process_work_completion_events (struct ibv_comp_channel *comp_channel,
 	*/
        total_wc = 0;
        do {
-			// TODO
-	       ret = NULL;
+	       ret = ibv_poll_cq(cq_ptr, max_wc - total_wc, wc + total_wc);
 	       if (ret < 0) {
 		       rdma_error("Failed to poll cq for wc due to %d \n", ret);
 		       /* ret is errno here */

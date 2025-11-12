@@ -44,8 +44,7 @@ static int client_prepare_connection(struct sockaddr_in *s_addr)
 	struct rdma_cm_event *cm_event = NULL;
 	int ret = -1;
 	/*  Open a channel used to report asynchronous communication event */
-	// TODO
-	cm_event_channel = NULL;
+	cm_event_channel = rdma_create_event_channel();
 	if (!cm_event_channel) {
 		rdma_error("Creating cm event channel failed, errno: %d \n", -errno);
 		return -errno;
@@ -54,8 +53,7 @@ static int client_prepare_connection(struct sockaddr_in *s_addr)
 	/* Create rdma_cm_id, the connection identifier (like socket) which is used 
 	 * to define an RDMA connection. 
 	 */
-	// TODO
-	ret = NULL;
+	ret = rdma_create_id(cm_event_channel, &cm_client_id, NULL, RDMA_PS_TCP);
 	if (ret) {
 		rdma_error("Creating cm id failed with errno: %d \n", -errno); 
 		return -errno;
@@ -63,8 +61,7 @@ static int client_prepare_connection(struct sockaddr_in *s_addr)
 	/* Resolve destination and optional source addresses from IP addresses  to
 	 * an RDMA address.  If successful, the specified rdma_cm_id will be bound
 	 * to a local device. */
-	 // TODO
-	ret = NULL;
+	ret = rdma_resolve_addr(cm_client_id, NULL, (struct sockaddr *)s_addr, 2000);
 	if (ret) {
 		rdma_error("Failed to resolve address, errno: %d \n", -errno);
 		return -errno;
@@ -87,8 +84,7 @@ static int client_prepare_connection(struct sockaddr_in *s_addr)
 
 	 /* Resolves an RDMA route to the destination address in order to 
 	  * establish a connection */
-	  // TODO
-	ret = NULL;
+	ret = rdma_resolve_route(cm_client_id, 2000);
 	if (ret) {
 		rdma_error("Failed to resolve route, erno: %d \n", -errno);
 	       return -errno;
@@ -114,8 +110,7 @@ static int client_prepare_connection(struct sockaddr_in *s_addr)
 	 * in the operating system. All resources are tied to a particular PD. 
 	 * And accessing recourses across PD will result in a protection fault.
 	 */
-	 // TODO
-	pd = NULL;
+	pd = ibv_alloc_pd(cm_client_id->verbs);
 	if (!pd) {
 		rdma_error("Failed to alloc pd, errno: %d \n", -errno);
 		return -errno;
@@ -127,8 +122,7 @@ static int client_prepare_connection(struct sockaddr_in *s_addr)
 	 * A completion channel is also tied to an RDMA device, hence we will 
 	 * use cm_client_id->verbs. 
 	 */
-	 // TODO
-	io_completion_channel = NULL;
+	io_completion_channel = ibv_create_comp_channel(cm_client_id->verbs);
 	if (!io_completion_channel) {
 		rdma_error("Failed to create IO completion event channel, errno: %d\n",
 			       -errno);
@@ -139,8 +133,7 @@ static int client_prepare_connection(struct sockaddr_in *s_addr)
 	 * completion metadata is placed. The metadata is packed into a structure 
 	 * called struct ibv_wc (wc = work completion).
 	 */
-	 // TODO
-	client_cq = NULL;
+	client_cq = ibv_create_cq(cm_client_id->verbs, CQ_CAPACITY, NULL, io_completion_channel, 0);
 	if (!client_cq) {
 		rdma_error("Failed to create CQ, errno: %d \n", -errno);
 		return -errno;
@@ -156,18 +149,16 @@ static int client_prepare_connection(struct sockaddr_in *s_addr)
          * The capacity here is define statically but this can be probed from the 
 	 * device. We just use a small number as defined in rdma_common.h */
        bzero(&qp_init_attr, sizeof qp_init_attr);
-	   // TODO 
-       qp_init_attr.cap.max_recv_sge = NULL; /* Maximum SGE per receive posting */
-       qp_init_attr.cap.max_recv_wr = NULL; /* Maximum receive posting capacity */
-       qp_init_attr.cap.max_send_sge = NULL; /* Maximum SGE per send posting */
-       qp_init_attr.cap.max_send_wr = NULL; /* Maximum send posting capacity */
+       qp_init_attr.cap.max_recv_sge = MAX_SGE; /* Maximum SGE per receive posting */
+       qp_init_attr.cap.max_recv_wr = MAX_WR; /* Maximum receive posting capacity */
+       qp_init_attr.cap.max_send_sge = MAX_SGE; /* Maximum SGE per send posting */
+       qp_init_attr.cap.max_send_wr = MAX_WR; /* Maximum send posting capacity */
        qp_init_attr.qp_type = IBV_QPT_RC; /* QP type, RC = Reliable connection */
        /* We use same completion queue, but one can use different queues */
        qp_init_attr.recv_cq = client_cq; /* Where should I notify for receive completion operations */
        qp_init_attr.send_cq = client_cq; /* Where should I notify for send completion operations */
        /*Lets create a QP */
-	   // TODO
-       ret = NULL;
+       ret = rdma_create_qp(cm_client_id, pd, &qp_init_attr);
 	if (ret) {
 		rdma_error("Failed to create QP, errno: %d \n", -errno);
 	       return -errno;
@@ -182,23 +173,21 @@ static int client_prepare_connection(struct sockaddr_in *s_addr)
 static int client_pre_post_recv_buffer()
 {
 	/* We first pre-post receive buffer for server file MR attributes*/
-	// TODO pre post metadata buffer and CTRL buffer
 	int ret = -1;
-	server_metadata_mr = NULL;
+	server_metadata_mr = rdma_buffer_alloc(pd, sizeof(struct rdma_buffer_attr), IBV_ACCESS_LOCAL_WRITE);
 	if(!server_metadata_mr){
 		rdma_error("Failed to setup the server metadata mr , -ENOMEM\n");
 		return -ENOMEM;
 	}
-	// TODO
-	server_recv_sge.addr = (uint64_t) NULL;
-	server_recv_sge.length = (uint32_t) NULL;
-	server_recv_sge.lkey = (uint32_t) NULL;
+	server_recv_sge.addr = (uint64_t) server_metadata_mr->addr;
+	server_recv_sge.length = (uint32_t) server_metadata_mr->length;
+	server_recv_sge.lkey = (uint32_t) server_metadata_mr->lkey;
 	/* now we link it to the request */
 	bzero(&server_recv_wr, sizeof(server_recv_wr));
 	server_recv_wr.wr_id = 0; // For this lab, wr_id is not important for client since we know which WC we are expecting logically
-	server_recv_wr.sg_list = NULL;
+	server_recv_wr.sg_list = &server_recv_sge;
 	server_recv_wr.num_sge = 1;
-	ret = NULL;
+	ret = ibv_post_recv(client_qp, &server_recv_wr, &bad_server_recv_wr);
 	if (ret) {
 		rdma_error("Failed to pre-post the receive buffer, errno: %d \n", ret);
 		return ret;
@@ -207,15 +196,19 @@ static int client_pre_post_recv_buffer()
 
 	/* Create CTRL MR similarly */
 	ctrl_recv_buf = calloc(1, CTRL_MAX);
-	// TODO
-	ctrl_recv_mr = NULL;
-	ctrl_recv_sge.addr   = (uintptr_t) NULL;
+	ctrl_recv_mr = rdma_buffer_register(pd, ctrl_recv_buf, CTRL_MAX, IBV_ACCESS_LOCAL_WRITE);
+	if (!ctrl_recv_mr) {
+		rdma_error("Failed to setup the ctrl recv mr , -ENOMEM\n");
+		return -ENOMEM;
+	}
+	ctrl_recv_sge.addr   = (uintptr_t) ctrl_recv_mr->addr;
     ctrl_recv_sge.length = CTRL_MAX;
-    ctrl_recv_sge.lkey   = NULL;
+    ctrl_recv_sge.lkey   = ctrl_recv_mr->lkey;
+	bzero(&ctrl_recv_wr, sizeof(ctrl_recv_wr));
 	ctrl_recv_wr.wr_id = 0xABC00001;
-	ctrl_recv_wr.sg_list = NULL;
+	ctrl_recv_wr.sg_list = &ctrl_recv_sge;
 	ctrl_recv_wr.num_sge = 1;
-	ret = NULL;
+	ret = ibv_post_recv(client_qp, &ctrl_recv_wr, &ctrl_bad_recv);
 	if (ret) { fprintf(stderr, "client post ctrl recv failed: %d\n", ret); return ret; }
 	
 	return 0;
@@ -312,32 +305,45 @@ static int client_send_msg_req()
 	memcpy(p->sha256, digest, 32);
 
 	// Post the send wr
-	// TODO
-	struct ibv_mr *req_mr = NULL;
+	struct ibv_mr *req_mr = rdma_buffer_register(pd, req_blob, sizeof(req_blob), IBV_ACCESS_LOCAL_WRITE);
+	if (!req_mr) {
+		rdma_error("Failed to register req_blob MR\n");
+		return -ENOMEM;
+	}
 	struct ibv_sge send_sge = {
-    	.addr   = (uintptr_t)NULL,
+    	.addr   = (uintptr_t)req_mr->addr,
     	.length = sizeof(req_blob),
-    	.lkey   = NULL
+    	.lkey   = req_mr->lkey
 		};
 	struct ibv_send_wr swr = {0}, *bad_swr = NULL;
-	swr.wr_id      = 0xABC10001; // todo: add note
-	swr.sg_list    = NULL;
+	swr.wr_id      = 0xABC10001;
+	swr.sg_list    = &send_sge;
 	swr.num_sge    = 1;
-	swr.opcode     = NULL;
+	swr.opcode     = IBV_WR_SEND;
 	swr.send_flags = IBV_SEND_SIGNALED;
-	ret = NULL;
-	if (ret) { fprintf(stderr, "client send REQ failed: %d\n", ret); return ret; }
+	ret = ibv_post_send(client_qp, &swr, &bad_swr);
+	if (ret) { 
+		fprintf(stderr, "client send REQ failed: %d\n", ret); 
+		ibv_dereg_mr(req_mr);
+		return ret; 
+	}
 
 	/* Here we process two completion event together: send completion and server metadata recv*/
 	struct ibv_wc wc[2];
-	// TODO: make sure process_work_completion_events is implemented in rdma_common.c
 	ret = process_work_completion_events(io_completion_channel, 
 			wc, 2);
 	if(ret != 2) {
 		rdma_error("We failed to get 2 work completions , ret = %d \n",
 				ret);
+		ibv_dereg_mr(req_mr);
 		return ret;
 	}
+	
+	/* Copy server metadata from receive buffer */
+	memcpy(&server_metadata_attr, server_metadata_mr->addr, sizeof(struct rdma_buffer_attr));
+	
+	ibv_dereg_mr(req_mr);
+	
 	printf("Client: sent MSG_REQ (file_len=%lu, sha256=\n", (unsigned long)file_len);
 	for (int k = 0; k < 32; k++) fprintf(stdout, "%02x", p->sha256[k]);
                         fprintf(stdout, "\n");
@@ -394,9 +400,7 @@ static int client_write_file()
 			struct ibv_wc wc;
 			int ret = process_work_completion_events(io_completion_channel, &wc, 1);
 			if (ret != 1) { rdma_error("client: poll send cqe err %d\n", ret); return ret; }
-			if (wc.opcode != IBV_WC_SEND) {
-                // nothing to do here
-            } else {
+			if (wc.opcode == IBV_WC_RDMA_WRITE) {
                 inflight--;
             }
             continue;
@@ -413,16 +417,15 @@ static int client_write_file()
         };
 
 		/* Create and post direct write WR*/
-		// TODO
 		struct ibv_send_wr wr = {0}, *bad = NULL;
-        wr.wr_id                 = NULL;
-        wr.sg_list               = NULL;
+        wr.wr_id                 = WRID_WRITE_TAG;
+        wr.sg_list               = &sge;
         wr.num_sge               = 1;
-        wr.opcode                = NULL; //Directly write to remote memory
-        wr.send_flags            = NULL; //signal every write
-        wr.wr.rdma.remote_addr   = NULL;
-        wr.wr.rdma.rkey          = NULL;
-		int ret = NULL;
+        wr.opcode                = IBV_WR_RDMA_WRITE; //Directly write to remote memory
+        wr.send_flags            = IBV_SEND_SIGNALED; //signal every write
+        wr.wr.rdma.remote_addr   = remote_base + off;
+        wr.wr.rdma.rkey          = remote_rkey;
+		ret = ibv_post_send(client_qp, &wr, &bad);
 		if (ret) {
             rdma_error("ibv_post_send RDMA_WRITE failed: %d\n", ret);
             return ret;
@@ -455,23 +458,22 @@ static int client_write_file()
     msg.h.len  = 0;
 
 	/* Create and post MSG_DONE */
-	// TODO
-	struct ibv_mr *mr = NULL;
+	struct ibv_mr *mr = rdma_buffer_register(pd, &msg, sizeof(msg), IBV_ACCESS_LOCAL_WRITE);
 	if (!mr) { rdma_error("client: reg DONE mr failed\n"); return -1; }
 	struct ibv_sge sge = {
-        .addr   = (uintptr_t)NULL,
+        .addr   = (uintptr_t)mr->addr,
         .length = sizeof(msg),
-        .lkey   = NULL
+        .lkey   = mr->lkey
     };
 
 	struct ibv_send_wr swr = {0}, *bad = NULL;
     swr.wr_id      = 0xD0D0D0D0ull;
-    swr.sg_list    = NULL;
+    swr.sg_list    = &sge;
     swr.num_sge    = 1;
-    swr.opcode     = NULL;
-    swr.send_flags = NULL;
+    swr.opcode     = IBV_WR_SEND;
+    swr.send_flags = IBV_SEND_SIGNALED;
 
-    ret = NULL;
+    ret = ibv_post_send(client_qp, &swr, &bad);
     if (ret) { rdma_error("client: post SEND DONE failed %d\n", ret); return ret; }
 
     ret = process_work_completion_events(io_completion_channel, &wc, 1);
@@ -502,8 +504,7 @@ static int client_wait_verdict() {
             printf("Client: verdict code=%u (%s)\n", v->code, v->code == 0 ? "OK" : "FAIL");
             
 			// Repost CTRL RECV WR. We need to reuse CTRL MR for future CTRL messages
-			// TODO
-			int r = NULL;
+			int r = ibv_post_recv(client_qp, &ctrl_recv_wr, &ctrl_bad_recv);
     		if (r) fprintf(stderr, "client: repost ctrl recv failed: %d\n", r);
             return (v->code == 0) ? 0 : 1;
         }
@@ -527,19 +528,18 @@ static int client_send_id()
     memcpy(blob + sizeof(*h), student_id, id_len);
 
 	/* Create and post MSG_ID */
-	// TODO
-	struct ibv_mr *mr = NULL;
+	struct ibv_mr *mr = rdma_buffer_register(pd, blob, sizeof(*h) + id_len, IBV_ACCESS_LOCAL_WRITE);
 	if (!mr) { rdma_error("client: reg ID mr failed\n"); return -1; }
 
-	struct ibv_sge sge = { .addr=(uintptr_t)NULL, .length=(uint32_t)(sizeof(*h)+id_len), .lkey=NULL };
+	struct ibv_sge sge = { .addr=(uintptr_t)mr->addr, .length=(uint32_t)(sizeof(*h)+id_len), .lkey=mr->lkey };
     struct ibv_send_wr swr = {0}, *bad=NULL;
 	swr.wr_id = 200;
-	swr.sg_list=NULL; 
-	swr.num_sge=1;
-	swr.opcode = NULL;
-	swr.send_flags = NULL;
+	swr.sg_list = &sge; 
+	swr.num_sge = 1;
+	swr.opcode = IBV_WR_SEND;
+	swr.send_flags = IBV_SEND_SIGNALED;
 
-	int ret = NULL;
+	int ret = ibv_post_send(client_qp, &swr, &bad);
     if (ret) { rdma_error("client: post MSG_ID failed %d\n", ret); ibv_dereg_mr(mr); return ret; }
 
 	struct ibv_wc wc;
